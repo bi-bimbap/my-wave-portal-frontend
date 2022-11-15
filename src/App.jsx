@@ -40,11 +40,16 @@ const getEthereumObject = () => window.ethereum;
 //   };
 
 export default function App() {
-  const [currentAccount, setCurrentAccount] = useState("");
-  const [allWaves, setAllWaves] = useState([]);
-  const [userInput, setUserInput] = useState("");
-  const contractAddress = "0xd02C222f240498cB91C45e078964ed385BA164EF";
+  const contractAddress = "0xD7bf1Ceb5adC3D975dad1bf131aEb229606f0234";
   const contractABI = abi.abi;
+  // set/get authorized MetaMask account
+  const [currentAccount, setCurrentAccount] = useState("");
+  // set/get wave data
+  const [allWaves, setAllWaves] = useState([]);
+  // set/get user input from textbox
+  const [userInput, setUserInput] = useState("");
+  // set/get loading indicator
+  const [loading, setLoading] = useState(false);
   
   /*
    * The passed callback function will be run when the page loads.
@@ -69,13 +74,54 @@ export default function App() {
     // }
   // }, []);
 
+  // listen to textbox onChange event to get latest user input
   const onChange = (event) => {
     setUserInput(event.target.value);
   };
 
+  // callback function for NewWave event listener in UseEffect()
+  // accessing data from event (i.e. from, timestamp, message)
+  const onNewWave = (from, timestamp, message) => {
+    console.log("NewWave", from, timestamp, message);
+
+    // new data will be appended the allWaves array, UI will be updated
+    // prevState contains previous state of data, i.e. it contains previous wave data
+    setAllWaves(prevState => [
+      ...prevState,
+      {
+        address: from,
+        timestamp: new Date(timestamp * 1000),
+        message: message,
+      },
+    ]);
+  };
+
   useEffect(() => {
     checkIfWalletIsConnected();
-  }, [])
+  }, []);
+
+  // listen for NewWave event
+  useEffect(() => {
+    let wavePortalContract;
+  
+    if (window.ethereum) {
+      const provider = new ethers.providers.Web3Provider(window.ethereum);
+      const signer = provider.getSigner();
+  
+      wavePortalContract = new ethers.Contract(contractAddress, contractABI, signer);
+      // ethers.js - to listen to events, it will trigger callback function onNewWave when event is emitted
+      wavePortalContract.on("NewWave", onNewWave);
+    }
+
+    // always make sure that if you're using some type of listener function,
+    // put it in a useEffect and return a function for cleaning it up
+    // otherwise component will re-render several hundred times when the event only happens once
+    return () => {
+      if (wavePortalContract) {
+        wavePortalContract.off("NewWave", onNewWave);
+      }
+    };
+  }, []);
 
   const checkIfWalletIsConnected = async () => {
     try {
@@ -134,7 +180,7 @@ export default function App() {
     try {
       const { ethereum } = window;
 
-      if (ethereum) {
+      if (ethereum) {        
         const provider = new ethers.providers.Web3Provider(ethereum);
         // object that represents an Ethereum account
         const signer = provider.getSigner();
@@ -144,7 +190,10 @@ export default function App() {
         console.log("Retrieved total wave count...", count.toNumber());
 
         // execute wave() from contract
+        // make the user pay a set amount of gas of 300,000
+        // if they don't use all of it in the transaction they'll automatically be refunded
         const waveTxn = await wavePortalContract.wave(userInput, { gasLimit: 300000 });
+        setLoading(true); // enable loading indicator
 
         console.log("Mining...", waveTxn.hash);
 
@@ -153,6 +202,7 @@ export default function App() {
 
         count = await wavePortalContract.getTotalWaves();
         console.log("Retrieved total wave count...", count.toNumber());
+        setLoading(false); // disable loading indicator
       } 
       else {
         console.log("Ethereum object doesn't exist!");
@@ -161,7 +211,7 @@ export default function App() {
     catch (error) {
       console.log(error);
     }
-  }
+  };
 
   const getAllWaves = async () => {
     try {
@@ -196,49 +246,30 @@ export default function App() {
     catch (error) {
       console.log("error");
     }
-  }
-
-  // let listenToNewWaveEvent = async () => {
-  //   try {
-  //     const { ethereum } = window;
-
-  //     if (ethereum) {
-  //       const provider = new ethers.providers.Web3Provider(ethereum);
-  //       // object that represents an Ethereum account
-  //       const signer = provider.getSigner();
-  //       // connect to smart contract
-  //       const wavePortalContract = new ethers.Contract(contractAddress, contractABI, signer);
-
-  //       wavePortalContract.on("NewWave", async (from, timestamp, message, event)) => {
-  //         getAllWaves();
-  //       });
-  //     } 
-  //     else {
-  //       console.log("Ethereum object doesn't exist!");
-  //     }
-  //   } 
-  //   catch (error) {
-  //     console.log(error);
-  //   }
-  // };
+  };
   
   return (
     <div className="mainContainer">
 
       <div className="dataContainer">
         <div className="header">
-        👋 Hello there!
+          Hey👋 Bi-bimbap here.
         </div>
 
         <div className="bio">
-        Bi-bimbap here~ I'm curious to learn more about Web3 and building my own apps :)
+        <p>I'm curious to learn more about Web3 and building my own apps :)</p>
+
+        <p>Wave at me on the Ethereum blockchain! Maybe send a sweet message too?
+           Connect your wallet, write your message, and then wave 👋.</p>
         </div>
 
-        <input type="text" value={userInput} onChange={onChange}></input>
+        <textarea placeholder="Enter your message here :)" value={userInput} onChange={onChange}></textarea>
 
-        <button className="waveButton" onClick={wave}>
-          Wave at Me
-        </button>
+        {loading ? (
+          <button disabled className="waveButton">Loading...</button>    
+        ) : ( 
+          <button className="waveButton" onClick={wave}>Wave at Me</button>
+        )}
 
         {/*
         * if there is no currentAccount, render this btn
@@ -249,15 +280,20 @@ export default function App() {
           </button>
         )}
 
-        {allWaves.map((wave, index) => {
-          return (
-            <div key={index} style={{ backgroundColor: "OldLace", marginTop: "16px", padding: "8px" }}>
-              <div>Address: {wave.address}</div>
-              <div>Time: {wave.timestamp.toString()}</div>
-              <div>Message: {wave.message}</div>
-            </div>
-          )
-        })}
+        <div className="dataContainer">
+          <p className="text-4xl font-extrabold text-gray-800 py-4">Wave Log 👀</p>
+          <p className="subheading">Check out all these people out here waving!</p>
+          
+          {allWaves.map((wave, index) => {
+            return (
+              <div key={index} style={{ backgroundColor: "OldLace", marginTop: "16px", padding: "8px" }}>
+                <div>Address: {wave.address}</div>
+                <div>Time: {wave.timestamp.toString()}</div>
+                <div>Message: {wave.message}</div>
+              </div>
+            )
+          })}
+        </div>
       </div>
     </div>
   );
